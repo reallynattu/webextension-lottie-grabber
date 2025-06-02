@@ -1,6 +1,8 @@
-import { browser, WebRequest, WebNavigation } from "webextension-polyfill-ts";
 import { debounce } from "ts-debounce";
 import { validateDotLottie, getAnimations, getManifest } from '@dotlottie/dotlottie-js';
+
+// Use Chrome APIs directly in service worker
+declare const chrome: any;
 
 
 // Track all discovered JSONs
@@ -36,17 +38,17 @@ const isLottieLike = (json: object): boolean => {
 
 // Update the extension badge with the number of discovered lotties.
 const updateBadge = debounce(async (tabId: number): Promise<void> => {
-  const data = await browser.storage.local.get();
+  const data = await chrome.storage.local.get();
 
   const tabLotties = Object.keys(data).filter((key) => data[key].tabId === tabId);
 
-  await browser.browserAction.setBadgeText({
+  await chrome.action.setBadgeText({
     tabId,
     text: tabLotties.length.toString(),
   });
 }, 500);
 
-const getHeader = (headers: WebRequest.HttpHeaders = [], name: string): string => {
+const getHeader = (headers: any[] = [], name: string): string => {
   const lcName = name.toLowerCase();
 
   for (let i = 0; i < headers.length; i += 1) {
@@ -58,7 +60,7 @@ const getHeader = (headers: WebRequest.HttpHeaders = [], name: string): string =
   return '';
 };
 
-const onRequestCompletedListener = async (details: WebRequest.OnCompletedDetailsType): Promise<void> => {
+const onRequestCompletedListener = async (details: any): Promise<void> => {
   // Skip non 200 HTTP responses and non GET requests
   if (details.statusCode !== 200 || details.method !== 'GET') {
     return;
@@ -105,9 +107,9 @@ const onRequestCompletedListener = async (details: WebRequest.OnCompletedDetails
   
       // Ensure JSON is a Lottie
       if (typeof json === "object" && isLottieLike(json)) {
-        const tab = await browser.tabs.get(details.tabId);
+        const tab = await chrome.tabs.get(details.tabId);
   
-        browser.storage.local.set({
+        chrome.storage.local.set({
           [hashKey]: {
             bmVersion: json.v,
             numLayers: json?.layers.length,
@@ -159,9 +161,9 @@ const onRequestCompletedListener = async (details: WebRequest.OnCompletedDetails
 
             // Ensure JSON is a Lottie
             if (typeof animationValue === "object" && isLottieLike(animationValue)) {
-              const tab = await browser.tabs.get(details.tabId);
+              const tab = await chrome.tabs.get(details.tabId);
   
-              browser.storage.local.set({
+              chrome.storage.local.set({
                 [hashKey]: {
                   bmVersion: animationValue.v,
                   numLayers: animationValue?.layers.length,
@@ -188,34 +190,38 @@ const onRequestCompletedListener = async (details: WebRequest.OnCompletedDetails
   }
 };
 
-const onNavigationBeforeNavigateListener = async (details: WebNavigation.OnBeforeNavigateDetailsType): Promise<void> => {
+const onNavigationBeforeNavigateListener = async (details: any): Promise<void> => {
   if (details.frameId === 0) {
-    const data = await browser.storage.local.get();
+    const data = await chrome.storage.local.get();
 
     // Clear out saved discovered Lotties for the tab
     Object.keys(data).forEach((key) => {
       if (data[key].tabId === details.tabId) {
-        browser.storage.local.remove(key);
+        chrome.storage.local.remove(key);
       }
     });
   }
 }
 
 // Set the badge background
-browser.browserAction.setBadgeBackgroundColor({
-  color: "rgb(15, 204, 206)",
-});
+try {
+  chrome.action.setBadgeBackgroundColor({
+    color: "rgb(15, 204, 206)",
+  });
+} catch (error) {
+  console.warn('Unable to set badge background color:', error);
+}
 
 // Attach the low level request listener
-browser.webRequest.onCompleted.addListener(
+chrome.webRequest.onCompleted.addListener(
   onRequestCompletedListener,
   {
     urls: ["<all_urls>"],
-    types: ["xmlhttprequest"],
+    types: ["xmlhttprequest", "other", "script", "main_frame", "sub_frame"],
   },
   ["responseHeaders"]
 );
 
-browser.webNavigation.onBeforeNavigate.addListener(onNavigationBeforeNavigateListener);
+chrome.webNavigation.onBeforeNavigate.addListener(onNavigationBeforeNavigateListener);
 
 console.log('Lottie Grabber is ready!');
